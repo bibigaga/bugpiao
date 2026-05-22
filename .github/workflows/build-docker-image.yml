@@ -2,31 +2,54 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'Dockerfile'
       - 'index.js'
       - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-docker-image.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REGISTRY: ghcr.io
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry
+      # GHCR 镜像名必须小写；用「用户名/仓库名」便于 GITHUB_TOKEN 自动关联权限
+      - name: Set image name
+        id: image
+        run: |
+          NAME="${REGISTRY}/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Image: ${NAME}"
+
+      - name: Log in to GHCR (PAT)
+        if: ${{ secrets.GHCR_PAT != '' }}
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Log in to GHCR (GITHUB_TOKEN)
+        if: ${{ secrets.GHCR_PAT == '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
@@ -36,10 +59,11 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/bugpiao:2088
+            ${{ steps.image.outputs.name }}:2088
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=HTTP Server
