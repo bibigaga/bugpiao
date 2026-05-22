@@ -36,21 +36,13 @@ jobs:
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "Image: ${NAME}"
 
-      - name: Log in to GHCR (PAT)
-        if: ${{ secrets.GHCR_PAT != '' }}
+      # if 里不能写 secrets.*；有 GHCR_PAT 时优先用 PAT，否则用 GITHUB_TOKEN
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
-
-      - name: Log in to GHCR (GITHUB_TOKEN)
-        if: ${{ secrets.GHCR_PAT == '' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
