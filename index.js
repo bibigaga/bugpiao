@@ -8,14 +8,33 @@ const { spawn } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(require('child_process').exec);
 
+// 日志工具函数
+function log(level, ...args) {
+    const levels = { error: 0, warn: 1, info: 2, debug: 3 };
+    const currentLevel = levels[LOG_LEVEL] || 2;
+    const msgLevel = levels[level] || 2;
+    if (msgLevel <= currentLevel) {
+        console[level === 'debug' ? 'log' : level](...args);
+    }
+}
+
+// 生成随机名称函数
+function generateRandomName() {
+    const characters = 'abcdefghijklmnopqrstuvwxyz';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+        result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
+}
+
 // 全局错误处理，防止主进程崩溃退出
 process.on('uncaughtException', (err) => {
-    console.error('未捕获的异常 (uncaughtException):', err.message);
-    console.error(err.stack);
+    log('error', 'Process error:', err.message);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('未处理的 Promise 拒绝 (unhandledRejection):', reason);
+    log('error', 'Promise rejection:', reason);
 });
 
 // 环境变量配置 (移除硬编码)
@@ -24,7 +43,7 @@ const PROJECT_URL = process.env.PROJECT_URL || '';
 const AUTO_ACCESS = process.env.AUTO_ACCESS === 'true';
 // 使用绝对路径确保在不同环境下的一致性
 const FILE_PATH = path.resolve(process.env.FILE_PATH || './tmp');
-const SUB_PATH = process.env.SUB_PATH || 'xiaomao';
+const SUB_PATH = process.env.SUB_PATH || generateRandomName();
 const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;
 const UUID = process.env.UUID || '';
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
@@ -33,22 +52,20 @@ const NEZHA_KEY = process.env.NEZHA_KEY || '';
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
 const ARGO_AUTH = process.env.ARGO_AUTH || '';
 const ARGO_PORT = parseInt(process.env.ARGO_PORT) || 8001;
-const CFIP = process.env.CFIP || 'saas.sin.fan';
+const CFIP = process.env.CFIP || 'www.shopify.com';
 const CFPORT = process.env.CFPORT || 443;
 const NAME = process.env.NAME || 'gaga';
+// 安全增强配置
+const DOWNLOAD_BASE_AMD = process.env.DOWNLOAD_BASE_AMD || 'https://amd64.ssss.nyc.mn';
+const DOWNLOAD_BASE_ARM = process.env.DOWNLOAD_BASE_ARM || 'https://arm64.ssss.nyc.mn';
+const AUTO_ACCESS_API = process.env.AUTO_ACCESS_API || 'https://oooo.serv00.net/add-url';
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info'; // 'error', 'warn', 'info', 'debug'
+const SITE_TITLE = process.env.SITE_TITLE || 'My Personal Blog';
+const SITE_DESC = process.env.SITE_DESC || 'Welcome to my personal website';
 
 // 运行目录准备
 if (!fs.existsSync(FILE_PATH)) {
     fs.mkdirSync(FILE_PATH, { recursive: true });
-}
-
-function generateRandomName() {
-    const characters = 'abcdefghijklmnopqrstuvwxyz';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-        result += characters.charAt(Math.floor(Math.random() * characters.length));
-    }
-    return result;
 }
 
 const npmName = generateRandomName();
@@ -92,8 +109,9 @@ async function uploadNodes() {
             await axios.post(UPLOAD_URL + '/api/add-subscriptions', jsonData, {
                 headers: { 'Content-Type': 'application/json' }
             });
-            console.log('Subscription uploaded successfully');
+            log('info', 'Subscription uploaded');
         } catch (error) {
+            log('debug', 'Upload failed:', error.message);
         }
     }
 }
@@ -117,12 +135,12 @@ async function deleteNodes() {
 async function AddVisitTask() {
     if (!AUTO_ACCESS || !PROJECT_URL) return;
     try {
-        await axios.post('https://oooo.serv00.net/add-url', { url: PROJECT_URL }, {
+        await axios.post(AUTO_ACCESS_API, { url: PROJECT_URL }, {
             headers: { 'Content-Type': 'application/json' }
         });
-        console.log('Automatic access task added successfully');
+        log('info', 'Auto access task added');
     } catch (error) {
-        console.error('Add automatic access task failed: ' + error.message);
+        log('debug', 'Auto access failed:', error.message);
     }
 }
 
@@ -132,19 +150,19 @@ function argoType() {
         fs.writeFileSync(path.join(FILE_PATH, 'tunnel.json'), ARGO_AUTH);
         const tunnelYaml = 'tunnel: ' + ARGO_AUTH.split('"')[11] + '\ncredentials-file: ' + path.join(FILE_PATH, 'tunnel.json') + '\nprotocol: http2\ningress:\n  - hostname: ' + ARGO_DOMAIN + '\n    service: http://localhost:' + ARGO_PORT + '\n    originRequest:\n      noTLSVerify: true\n  - service: http_status:404';
         fs.writeFileSync(path.join(FILE_PATH, 'tunnel.yml'), tunnelYaml);
-        console.log('TunnelSecret configuration generated');
+        log('info', 'Tunnel config generated');
     }
 }
 
 // 进程守护与按需恢复逻辑
 async function keepAlive(name, filePath, command, args, delay = 5000) {
-    console.log(`[${new Date().toISOString()}] 正在启动进程: ${name}`);
+    log('debug', `Starting process: ${name}`);
 
     if (!fs.existsSync(filePath)) {
-        console.log(`检测到文件 ${filePath} 缺失，正在尝试恢复...`);
+        log('debug', `File missing, recovering: ${path.basename(filePath)}`);
         await downloadFilesAndRun();
         if (!fs.existsSync(filePath)) {
-            console.error(`恢复失败: 无法获取文件 ${filePath}，将在 ${delay}ms 后重试...`);
+            log('error', `Recovery failed for ${path.basename(filePath)}`);
             setTimeout(() => keepAlive(name, filePath, command, args, delay), delay);
             return;
         }
@@ -156,21 +174,20 @@ async function keepAlive(name, filePath, command, args, delay = 5000) {
         const child = spawn('./' + exeName, args, {
             cwd: FILE_PATH,
             detached: false,
-            stdio: 'inherit'
+            stdio: LOG_LEVEL === 'debug' ? 'inherit' : 'ignore'
         });
 
         child.on('exit', (code, signal) => {
-            console.log(`[${new Date().toISOString()}] 进程 ${name} 退出 (代码: ${code}, 信号: ${signal})，将在 ${delay}ms 后重启...`);
+            log('debug', `Process ${name} exited (code: ${code}), restarting...`);
             setTimeout(() => keepAlive(name, filePath, command, args, delay), delay);
         });
 
         child.on('error', (err) => {
-            console.error(`进程 ${name} 运行错误: ${err.message}`);
-            // 发生错误时也尝试重启
+            log('error', `Process ${name} error:`, err.message);
             setTimeout(() => keepAlive(name, filePath, command, args, delay), delay);
         });
     } catch (err) {
-        console.error(`无法启动进程 ${name}: ${err.message}`);
+        log('error', `Failed to start ${name}:`, err.message);
         setTimeout(() => keepAlive(name, filePath, command, args, delay), delay);
     }
 }
@@ -179,13 +196,20 @@ async function keepAlive(name, filePath, command, args, delay = 5000) {
 function downloadFile(fileName, fileUrl) {
     return new Promise((resolve, reject) => {
         const writer = fs.createWriteStream(fileName);
-        axios({ method: 'get', url: fileUrl, responseType: 'stream' })
+        axios({ 
+            method: 'get', 
+            url: fileUrl, 
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        })
             .then(response => {
                 response.data.pipe(writer);
                 writer.on('finish', () => {
                     writer.close();
                     fs.chmodSync(fileName, 0o775);
-                    console.log('下载成功: ' + path.basename(fileName));
+                    log('debug', 'Downloaded:', path.basename(fileName));
                     resolve(fileName);
                 });
                 writer.on('error', err => {
@@ -203,7 +227,7 @@ function getSystemArchitecture() {
 }
 
 function getFilesForArchitecture(architecture) {
-    const prefix = architecture === 'arm' ? "https://arm64.ssss.nyc.mn" : "https://amd64.ssss.nyc.mn";
+    const prefix = architecture === 'arm' ? DOWNLOAD_BASE_ARM : DOWNLOAD_BASE_AMD;
     let files = [
         { fileName: webPath, fileUrl: prefix + '/web' },
         { fileName: botPath, fileUrl: prefix + '/bot' }
@@ -226,7 +250,7 @@ async function downloadFilesAndRun() {
             try {
                 await downloadFile(file.fileName, file.fileUrl);
             } catch (err) {
-                console.error('下载失败 ' + file.fileName + ': ' + err.message);
+                log('error', 'Download failed:', path.basename(file.fileName));
             }
         }
     }
@@ -264,23 +288,22 @@ async function generateConfig() {
 }
 
 async function extractDomains() {
-    console.log('[extractDomains] ARGO_AUTH 长度: ' + (ARGO_AUTH ? ARGO_AUTH.length : 0) + ', ARGO_DOMAIN: "' + ARGO_DOMAIN + '"');
+    log('debug', 'Extracting domains, ARGO_AUTH length:', ARGO_AUTH ? ARGO_AUTH.length : 0);
     if (ARGO_AUTH && ARGO_DOMAIN) {
-        console.log('[extractDomains] 使用固定域名模式: ' + ARGO_DOMAIN);
+        log('info', 'Using fixed domain mode');
         await generateLinks(ARGO_DOMAIN);
     } else if (ARGO_AUTH && !ARGO_DOMAIN) {
-        console.warn('[extractDomains] ⚠️ 检测到 ARGO_AUTH 已设置但 ARGO_DOMAIN 为空！Token 模式必须同时设置 ARGO_DOMAIN 环境变量。');
-        console.warn('[extractDomains] 请在 Railway 环境变量中添加 ARGO_DOMAIN=你的隧道域名');
+        log('warn', 'ARGO_AUTH set but ARGO_DOMAIN missing. Token mode requires ARGO_DOMAIN.');
     } else {
         // 临时隧道逻辑
-        console.log('[extractDomains] 使用临时隧道模式，等待获取域名...');
+        log('info', 'Using temporary tunnel mode');
         let count = 0;
         const checkLog = async () => {
             if (fs.existsSync(bootLogPath)) {
                 const content = fs.readFileSync(bootLogPath, 'utf-8');
                 const match = content.match(/https?:\/\/([^ ]*trycloudflare\.com)\/?/);
                 if (match) {
-                    console.log('获取到临时域名: ' + match[1]);
+                    log('info', 'Temporary domain obtained');
                     await generateLinks(match[1]);
                     return;
                 }
@@ -288,7 +311,7 @@ async function extractDomains() {
             if (count++ < 20) {
                 setTimeout(checkLog, 2000);
             } else {
-                console.error('[extractDomains] 超时: 未能获取临时隧道域名');
+                log('error', 'Timeout: Failed to get temporary tunnel domain');
             }
         };
         checkLog();
@@ -296,9 +319,9 @@ async function extractDomains() {
 }
 
 async function generateLinks(argoDomain) {
-    console.log('[generateLinks] 开始生成节点, 域名: ' + argoDomain);
+    log('debug', 'Generating links for domain:', argoDomain);
     const ISP = await getMetaInfo();
-    console.log('[generateLinks] ISP信息: ' + ISP);
+    log('debug', 'ISP info:', ISP);
     const nodeName = NAME ? NAME + '-' + ISP : ISP;
     const VMESS = { v: '2', ps: nodeName, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'none', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560', tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox' };
     const subTxt = '\nvless://' + UUID + '@' + CFIP + ':' + CFPORT + '?encryption=none&security=tls&sni=' + argoDomain + '&fp=firefox&type=ws&host=' + argoDomain + '&path=%2Fvless-argo%3Fed%3D2560#' + nodeName + '\n\nvmess://' + Buffer.from(JSON.stringify(VMESS)).toString('base64') + '\n\ntrojan://' + UUID + '@' + CFIP + ':' + CFPORT + '?security=tls&sni=' + argoDomain + '&fp=firefox&type=ws&host=' + argoDomain + '&path=%2Ftrojan-argo%3Fed%3D2560#' + nodeName + '\n    ';
@@ -309,7 +332,7 @@ async function generateLinks(argoDomain) {
         res.send(Buffer.from(subTxt).toString('base64'));
     });
 
-    console.log('[generateLinks] ✅ 节点生成完成, 订阅路径: /' + SUB_PATH);
+    log('info', 'Links generated, subscription path: /' + SUB_PATH);
     await uploadNodes();
 }
 
@@ -349,10 +372,42 @@ async function startserver() {
     await AddVisitTask();
 }
 
-app.get("/", (req, res) => res.send("Hello world!"));
-app.listen(PORT, () => {
-    console.log('Server running on port ' + PORT);
-    console.log('环境变量状态: UUID=' + (UUID ? '已设置' : '❌未设置') + ', ARGO_AUTH=' + (ARGO_AUTH ? '已设置(长度' + ARGO_AUTH.length + ')' : '❌未设置') + ', ARGO_DOMAIN=' + (ARGO_DOMAIN || '❌未设置'));
+// 伪装首页
+app.get("/", (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${SITE_TITLE}</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #333; }
+        p { color: #666; }
+        .footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; color: #999; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>${SITE_TITLE}</h1>
+    <p>${SITE_DESC}</p>
+    <p>This is a simple web application built with Node.js and Express.</p>
+    <div class="footer">
+        <p>&copy; ${new Date().getFullYear()} All rights reserved.</p>
+    </div>
+</body>
+</html>`);
 });
 
-startserver().catch(console.error);
+// 健康检查端点
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: Date.now() });
+});
+
+app.listen(PORT, () => {
+    log('info', 'Server running on port ' + PORT);
+    log('debug', 'Environment check: UUID=' + (UUID ? 'SET' : 'NOT SET') + 
+        ', ARGO_AUTH=' + (ARGO_AUTH ? 'SET(len:' + ARGO_AUTH.length + ')' : 'NOT SET') + 
+        ', ARGO_DOMAIN=' + (ARGO_DOMAIN || 'NOT SET'));
+});
+
+startserver().catch(err => log('error', 'Server error:', err.message));
